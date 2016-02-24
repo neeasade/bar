@@ -116,6 +116,10 @@ static int bu = 1; // Underline height
 static rgba_t fgc, bgc, ugc;
 static rgba_t dfgc, dbgc, dugc;
 static area_stack_t area_stack;
+static int slant;
+static int slant_width;
+static int full_slant_width;
+static int slant_height;
 
 static XftColor sel_fg;
 static XftDraw *xft_draw;
@@ -250,7 +254,7 @@ int xft_char_width (uint16_t ch, font_t *cur_font)
 }
 
 int
-shift (monitor_t *mon, int x, int align, int ch_width)
+shift (monitor_t *mon, int x, int align, int ch_width, int slant)
 {
     switch (align) {
         case ALIGN_C:
@@ -268,9 +272,52 @@ shift (monitor_t *mon, int x, int align, int ch_width)
             x = mon->width - ch_width;
             break;
     }
-    
-        /* Draw the background first */
-    fill_rect(mon->pixmap, gc[GC_CLEAR], x, 0, ch_width, bh);
+
+    /* Draw the background first */
+    if(slant_width)
+    {
+        //odd = slant left, even = slant right
+        // if > 20, upslant.
+        int left = slant%2;
+        int i = 0;
+        int cur_height = 0;
+
+        if(!full_slant_width)
+        {
+            full_slant_width = slant_width * ch_width;
+        }
+
+        for(i=0; i<ch_width; i++)
+        {
+            //handles int division better:
+            int height_calc = (!bh%full_slant_width ? bh/full_slant_width : (bh/full_slant_width) + 1);
+
+            cur_height = height_calc*(i) + height_calc;
+            cur_height+=slant_height;
+
+            if(i == ch_width - 1)
+            {
+                slant_height=cur_height;
+            }
+
+            if(! left){
+                cur_height = bh - cur_height;
+            }
+
+            if(slant > 20)
+            {
+                cur_height*=-1;
+            }
+
+           fill_rect(mon->pixmap, gc[GC_CLEAR], x+i, cur_height, 1, bh);
+        }
+
+        slant_width--;
+    }
+    else
+    {
+        fill_rect(mon->pixmap, gc[GC_CLEAR], x, 0, ch_width, bh);
+    }
     return x;
 }
 
@@ -287,12 +334,12 @@ draw_lines (monitor_t *mon, int x, int w)
 void
 draw_shift (monitor_t *mon, int x, int align, int w)
 {
-    x = shift(mon, x, align, w);
+    x = shift(mon, x, align, w, slant);
     draw_lines(mon, x, w);
 }
 
 int
-draw_char (monitor_t *mon, font_t *cur_font, int x, int align, uint16_t ch)
+draw_char (monitor_t *mon, font_t *cur_font, int x, int align, uint16_t ch, int slant)
 {
     int ch_width;
 
@@ -304,7 +351,7 @@ draw_char (monitor_t *mon, font_t *cur_font, int x, int align, uint16_t ch)
             cur_font->width;
     }
 
-    x = shift(mon, x, align, ch_width);
+    x = shift(mon, x, align, ch_width, slant);
 
     int y = bh / 2 + cur_font->height / 2- cur_font->descent + offsets_y[offset_y_index];
     if (cur_font->xft_ft) {
@@ -312,7 +359,7 @@ draw_char (monitor_t *mon, font_t *cur_font, int x, int align, uint16_t ch)
     } else {
         /* xcb accepts string in UCS-2 BE, so swap */
         ch = (ch >> 8) | (ch << 8);
-        
+
         // The coordinates here are those of the baseline
         xcb_poly_text_16_simple(c, mon->pixmap, gc[GC_DRAW],
                             x, y,
@@ -494,7 +541,7 @@ area_add (char *str, const char *optend, char **end, monitor_t *mon, const int x
     }
 
     if (area_stack.at + 1 > area_stack.max) {
-        fprintf(stderr, "Cannot add any more clickable areas (used %d/%d)\n", 
+        fprintf(stderr, "Cannot add any more clickable areas (used %d/%d)\n",
                 area_stack.at, area_stack.max);
         return false;
     }
@@ -640,6 +687,15 @@ parse (char *text)
                     case 'F': fgc = parse_color(p, &p, dfgc); update_gc(); break;
                     case 'U': ugc = parse_color(p, &p, dugc); update_gc(); break;
 
+                    case 'E':
+                    case 'e':
+                    case 'D':
+                    case 'd': slant = *(p-1) - 'A'; // 4,36,5,37
+                              slant_width = (*p++)-'0';
+                              slant_height = 0;
+                              full_slant_width=0;
+                              break;
+
                     case 'S':
                               if (*p == '+' && cur_mon->next)
                               { cur_mon = cur_mon->next; }
@@ -749,7 +805,7 @@ parse (char *text)
                 xcb_change_gc(c, gc[GC_DRAW] , XCB_GC_FONT, (const uint32_t []) {
                 cur_font->ptr
             });
-            int w = draw_char(cur_mon, cur_font, pos_x, align, ucs);
+            int w = draw_char(cur_mon, cur_font, pos_x, align, ucs, slant);
 
             pos_x += w;
             area_shift(cur_mon->window, align, w);
@@ -1149,19 +1205,19 @@ xcb_visualid_t
 get_visual (void)
 {
 
-    XVisualInfo xv; 
+    XVisualInfo xv;
     xv.depth = 32;
     int result = 0;
-    XVisualInfo* result_ptr = NULL; 
+    XVisualInfo* result_ptr = NULL;
     result_ptr = XGetVisualInfo(dpy, VisualDepthMask, &xv, &result);
 
     if (result > 0) {
         visual_ptr = result_ptr->visual;
         return result_ptr->visualid;
     }
-    
+
     //Fallback
-    visual_ptr = DefaultVisual(dpy, scr_nbr);	
+    visual_ptr = DefaultVisual(dpy, scr_nbr);
 	return scr->root_visual;
 }
 
