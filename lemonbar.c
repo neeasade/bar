@@ -119,7 +119,8 @@ static area_stack_t area_stack;
 static int slant;
 static int slant_width;
 static int full_slant_width;
-static int slant_height;
+static int slant_counter;
+static int upslant;
 
 static XftColor sel_fg;
 static XftDraw *xft_draw;
@@ -276,43 +277,26 @@ shift (monitor_t *mon, int x, int align, int ch_width, int slant)
     /* Draw the background first */
     if(slant_width)
     {
-        //odd = slant left, even = slant right
-        // if > 20, upslant.
-        int left = slant%2;
-        int i = 0;
+        // even = slant left, odd = slant right
+        int right = slant % 2;
         int cur_height = 0;
 
         if(!full_slant_width)
-        {
             full_slant_width = slant_width * ch_width;
-        }
 
-        for(i=0; i<ch_width; i++)
+        for(int i = 0; i < ch_width; i++)
         {
-            //handles int division better:
-            int height_calc = (!bh%full_slant_width ? bh/full_slant_width : (bh/full_slant_width) + 1);
+            slant_counter++;
+            if (right)
+                cur_height = (bh * (full_slant_width - slant_counter)) / full_slant_width;
+            else
+                cur_height = (slant_counter * bh) / full_slant_width;
 
-            cur_height = height_calc*(i) + height_calc;
-            cur_height+=slant_height;
+            if (!upslant)
+                cur_height *= -1;
 
-            if(i == ch_width - 1)
-            {
-                slant_height=cur_height;
-            }
-
-            if(! left){
-                cur_height = bh - cur_height;
-            }
-
-            if(slant > 20)
-            {
-                cur_height*=-1;
-            }
-
-           fill_rect(mon->pixmap, gc[GC_CLEAR], x+i, cur_height, 1, bh);
+            fill_rect(mon->pixmap, gc[GC_CLEAR], x+i, cur_height, 1, bh);
         }
-
-        slant_width--;
     }
     else
     {
@@ -690,10 +674,12 @@ parse (char *text)
                     case 'E':
                     case 'e':
                     case 'D':
-                    case 'd': slant = *(p-1) - 'A'; // 4,36,5,37
-                              slant_width = (*p++)-'0';
-                              slant_height = 0;
-                              full_slant_width=0;
+                    case 'd':
+                              slant = *(p-1) - 'A'; // 4,36,5,37
+                              slant_width = (*p++) - '0';
+                              full_slant_width = 0;
+                              slant_counter = 0;
+                              upslant = slant > 20 ? 1 : 0;
                               break;
 
                     case 'S':
